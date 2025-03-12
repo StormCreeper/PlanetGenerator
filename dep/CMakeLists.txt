@@ -14,6 +14,10 @@ set_property(TARGET glfw PROPERTY FOLDER "dep")
 # GLM for basic mathematical operators
 add_subdirectory(glm)
 
+# Fast noise
+set(FASTNOISE2_NOISETOOL OFF CACHE BOOL "Build Noise Tool" FORCE)
+add_subdirectory(FastNoise2)
+
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/glfw/include)
 
 add_subdirectory(imgui)

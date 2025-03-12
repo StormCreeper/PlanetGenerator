@@ -16,7 +16,12 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
+#include <FastNoise/FastNoise.h>
+
 #include "Camera.h"
+#include "Mesh.h"
+#include "Light.h"
+#include "Material.h"
 
 // Function prototypes
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
@@ -28,6 +33,8 @@ GLuint VAO, VBO, EBO;
 float deltaTime = 0.0f, lastFrame = 0.0f;
 
 std::shared_ptr<Camera> cameraPtr;
+
+std::vector<std::shared_ptr<AbstractLight>> lights;
 
 static bool isRotating(false);
 static bool isPanning(false);
@@ -120,37 +127,123 @@ void windowSizeCallback(GLFWwindow* windowPtr, int width, int height) {
 							  static_cast<float>(height));
 }
 
-GLuint genGPUBuffer(size_t elementSize, size_t numElements, const void* data) {
-	GLuint buffer;
-	glGenBuffers(1, &buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, buffer);
-	glBufferData(GL_ARRAY_BUFFER, elementSize * numElements, data,
-				 GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	return buffer;
+void renderMaterialUI(Material& mat, int id) {
+	ImGui::ColorEdit3(("Albedo##In" + std::to_string(id)).c_str(),
+					  &mat.albedo().x);
+
+	ImGui::SliderFloat(("Roughness##" + std::to_string(id)).c_str(),
+					   &mat.roughness(), 0.0f, 1.0f);
+
+	ImGui::SliderFloat(("Metalness##" + std::to_string(id)).c_str(),
+					   &mat.metalness(), 0.0f, 1.0f);
+
+	ImGui::ColorEdit3(("F0##" + std::to_string(id)).c_str(), &mat.F0().x);
 }
 
-GLuint genIndexBuffer(size_t elementSize, size_t numElements,
-					  const void* data) {
-	GLuint buffer;
-	glGenBuffers(1, &buffer);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elementSize * numElements, data,
-				 GL_STATIC_DRAW);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-	return buffer;
-}
+void renderUI() {
+	ImGui::NewFrame();
+	ImGui::Begin("Performance", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+	ImGui::Text("FPS: %.1f", 1.0f / deltaTime);
+	ImGui::End();
 
-GLuint genVertexArray(GLuint vbo, GLuint ebo) {
-	GLuint vao;
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
-	glEnableVertexAttribArray(0);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), 0);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-	glBindVertexArray(0);
-	return vao;
+	ImGui::Begin("Lights", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+
+	const char* items[] = {"Directional", "Point"};
+
+	for (int i = 0; i < lights.size(); i++) {
+		AbstractLight& light = *lights[i];
+		if (ImGui::CollapsingHeader(
+				std::string("Light " + std::to_string(i)).c_str())) {
+			ImGui::Indent(10.0f);
+			const char* comboLabel = items[light.getType()];
+
+			if (ImGui::BeginCombo(
+					("Type##" + std::to_string(i)).c_str(),
+					comboLabel)) {	// Combo box for type selection
+				for (int n = 0; n < IM_ARRAYSIZE(items); n++) {
+					const bool is_selected = (comboLabel == items[n]);
+					if (ImGui::Selectable(items[n], is_selected)) {
+						if (n != light.getType()) {
+							std::shared_ptr<AbstractLight> new_light;
+							switch (n) {
+								case 0:
+									new_light =
+										std::make_shared<DirectionalLight>(
+											light.color(),
+											light.baseIntensity(),
+											glm::vec3(0.0, -1.0, 0.0));
+									break;
+								case 1:
+									new_light = std::make_shared<PointLight>(
+										light.color(), light.baseIntensity(),
+										glm::vec3(0.0), 1.0, 0.0, 0.0);
+							}
+							lights[i] = new_light;
+							light = *new_light;
+						};
+					}
+					if (is_selected) {
+						ImGui::SetItemDefaultFocus();  // You may set the
+													   // initial focus when
+													   // opening the combo
+													   // (scrolling + for
+													   // keyboard navigation
+													   // support)
+					}
+				}
+				ImGui::EndCombo();
+			}
+			// Common properties: color and intensity
+			glm::vec3 color = light.color();
+			float intensity = light.baseIntensity();
+			ImGui::ColorEdit3(("Color##" + std::to_string(i)).c_str(),
+							  &color.x);
+			ImGui::SliderFloat(("Intensity##" + std::to_string(i)).c_str(),
+							   &intensity, 0.0f, 10.0f);
+			light.color() = color;
+			light.baseIntensity() = intensity;
+
+			if (light.getType() == 0) {	 // Directional light
+				std::shared_ptr<DirectionalLight> dirLight =
+					std::dynamic_pointer_cast<DirectionalLight>(lights[i]);
+				glm::vec3 dir = dirLight->getDirection();
+				ImGui::SliderFloat3(("Direction##" + std::to_string(i)).c_str(),
+									&dir.x, -1.0f, 1.0f);
+				dirLight->setDirection(dir);
+			} else if (light.getType() == 1) {	// Point light
+				std::shared_ptr<PointLight> pointLight =
+					std::dynamic_pointer_cast<PointLight>(lights[i]);
+				glm::vec3 pos = pointLight->getTranslation();
+				ImGui::SliderFloat3(("Position##" + std::to_string(i)).c_str(),
+									&pos.x, -10.0f, 10.0f);
+				pointLight->setTranslation(pos);
+				ImGui::SliderFloat(
+					("Attenuation constant##" + std::to_string(i)).c_str(),
+					&pointLight->attenuationConstant(), 0.0f, 1.0f);
+				ImGui::SliderFloat(
+					("Attenuation linear##" + std::to_string(i)).c_str(),
+					&pointLight->attenuationLinear(), 0.0f, 1.0f);
+				ImGui::SliderFloat(
+					("Attenuation quadratic##" + std::to_string(i)).c_str(),
+					&pointLight->attenuationQuadratic(), 0.0f, 1.0f);
+			}
+			ImGui::Indent(-10.0f);
+		}
+	}
+	if (lights.size() < 10) {
+		if (ImGui::Button("Add light")) {
+			lights.push_back(std::make_shared<PointLight>(
+				glm::vec3(1.0f), 1.0f, glm::vec3(0.0f), 1.0f, 0.0f, 0.0f));
+		}
+		ImGui::SameLine();
+	}
+	if (lights.size() > 0 && ImGui::Button("Remove light")) {
+		lights.erase(lights.begin() + lights.size() - 1);
+	}
+
+	ImGui::End();
+
+	ImGui::Render();
 }
 
 int main() {
@@ -204,6 +297,25 @@ int main() {
 	cameraPtr->setNear(0.1f);
 	cameraPtr->setFar(100.f);
 
+	// Lights
+
+	lights.push_back(std::make_shared<DirectionalLight>(
+		glm::vec3(0.7f, 0.9f, 0.9f), 4.0f,
+		glm::normalize(glm::vec3(0.04f, -0.544f, -0.838f))));
+
+	glm::vec3 pos1 = 1.5f * glm::normalize(glm::vec3(-1, 0.5, 0.5));
+	glm::vec3 pos2 = 1.5f * glm::normalize(glm::vec3(1, 0.5, -0.1));
+	glm::vec3 pos3 = 1.5f * glm::normalize(glm::vec3(0.2, 0, -1));
+
+	lights.push_back(std::make_shared<PointLight>(
+		glm::vec3(1.0f, 0.5f, 0.5f), 4.0f, pos1, 1.0f, 0.0f, 0.2f));
+	lights.push_back(std::make_shared<PointLight>(
+		glm::vec3(0.5f, 1.0f, 0.5f), 4.0f, pos2, 1.0f, 0.0f, 0.2f));
+	lights.push_back(std::make_shared<PointLight>(
+		glm::vec3(0.8f, 0.5f, 1.0f), 4.0f, pos3, 1.0f, 0.0f, 0.2f));
+
+	Material material{glm::vec3(1.0f), 0.8f, 0.5f, glm::vec3(1.0f)};
+
 	// Load shaders
 	std::string shaders_folder = "../Resources/Shaders/";
 	std::shared_ptr<ShaderProgram> shader =
@@ -211,16 +323,12 @@ int main() {
 											 shaders_folder + "shader.frag");
 
 	// Generate sphere mesh
-	std::vector<glm::vec3> sphereVertices;
-	std::vector<glm::uvec3> sphereIndices;
-	generateSphereMesh(100, sphereVertices, sphereIndices);
+	Mesh sphereMesh;
+	generateSphereMesh(100, sphereMesh.positions(), sphereMesh.indices());
 
-	// VAO, VBO setup
-	VBO = genGPUBuffer(sizeof(float) * 3, sphereVertices.size(),
-					   sphereVertices.data());
-	EBO = genIndexBuffer(sizeof(unsigned int) * 3, sphereIndices.size(),
-						 sphereIndices.data());
-	VAO = genVertexArray(VBO, EBO);
+	sphereMesh.recomputePerVertexNormals();
+
+	sphereMesh.toGPU();
 
 	while (!glfwWindowShouldClose(windowPtr)) {
 		float currentFrame = static_cast<float>(glfwGetTime());
@@ -235,19 +343,23 @@ int main() {
 		shader->set("view", cameraPtr->computeViewMatrix());
 		shader->set("projection", cameraPtr->computeProjectionMatrix());
 
-		glBindVertexArray(VAO);
-		glDrawElements(GL_TRIANGLES, sphereIndices.size() * 3, GL_UNSIGNED_INT,
-					   0);
-		glBindVertexArray(0);
+		for (size_t i = 0; i < lights.size(); i++) {
+			lights[i]->setUniforms(*shader,
+								   "lights[" + std::to_string(i) + "]");
+		}
+		shader->set("numOfLights", (int)lights.size());
+
+		material.setUniforms(*shader, "material");
+
+		glm::vec3 eyePos = glm::inverse(cameraPtr->computeViewMatrix())[3];
+		shader->set("eyePos", eyePos);
+
+		sphereMesh.render();
 
 		// ImGui UI
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
-		ImGui::NewFrame();
-		ImGui::Begin("Performance");
-		ImGui::Text("FPS: %.1f", 1.0f / deltaTime);
-		ImGui::End();
-		ImGui::Render();
+		renderUI();
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
 		glfwSwapBuffers(windowPtr);
@@ -282,7 +394,6 @@ void addFace(glm::vec3 xdir, glm::vec3 ydir, int subdivisions,
 			float x = 2.0f * i / (float)(subdivisions - 1) - 1.0f;
 			float y = 2.0f * j / (float)(subdivisions - 1) - 1.0f;
 			glm::vec3 vertex = x * xdir + y * ydir + zdir;
-			vertex = glm::normalize(vertex);
 			vertices.push_back(vertex);
 		}
 	}
@@ -301,6 +412,8 @@ void addFace(glm::vec3 xdir, glm::vec3 ydir, int subdivisions,
 	}
 }
 
+float getHeight(const glm::vec3& normPos);
+
 // Generate a sphere mesh with a given number of subdivisions
 void generateSphereMesh(int subdivisions, std::vector<glm::vec3>& vertices,
 						std::vector<glm::uvec3>& indices) {
@@ -314,4 +427,24 @@ void generateSphereMesh(int subdivisions, std::vector<glm::vec3>& vertices,
 	addFace(ydir, zdir, subdivisions, vertices, indices);
 	addFace(-xdir, zdir, subdivisions, vertices, indices);
 	addFace(xdir, zdir, subdivisions, vertices, indices);
+
+	for (glm::vec3& vertex : vertices) {
+		vertex = glm::normalize(vertex);
+		vertex *= getHeight(vertex);
+	}
+}
+
+float getHeight(const glm::vec3& normPos) {
+	auto fnSimplex = FastNoise::New<FastNoise::Simplex>();
+	auto fnFractal = FastNoise::New<FastNoise::FractalFBm>();
+
+	fnFractal->SetSource(fnSimplex);
+	fnFractal->SetOctaveCount(5);
+
+	float height = fnFractal->GenSingle3D(normPos.x, normPos.y, normPos.z, 0);
+
+	height = 0.5f * height + 0.5f;
+	height = glm::pow(height, 5);
+
+	return 1 + height * 0.2f;
 }
