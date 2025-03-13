@@ -31,10 +31,12 @@ void generateSphereMesh(int subdivisions, std::vector<glm::vec3>& vertices,
 // Global variables
 GLuint VAO, VBO, EBO;
 float deltaTime = 0.0f, lastFrame = 0.0f;
+std::shared_ptr<ShaderProgram> shader;
 
 std::shared_ptr<Camera> cameraPtr;
 
 std::vector<std::shared_ptr<AbstractLight>> lights;
+Material material{glm::vec3(1.0f), 0.8f, 0.5f, glm::vec3(1.0f)};
 
 static bool isRotating(false);
 static bool isPanning(false);
@@ -52,10 +54,8 @@ void keyCallback(GLFWwindow* windowPtr, int key, int scancode, int action,
 		}
 		if (action == GLFW_PRESS && key == GLFW_KEY_F12) {
 			std::string shaders_folder = "../Resources/Shaders/";
-			std::shared_ptr<ShaderProgram> shader =
-				ShaderProgram::genBasicShaderProgram(
-					shaders_folder + "shader.vert",
-					shaders_folder + "shader.frag");
+			shader = ShaderProgram::genBasicShaderProgram(
+				shaders_folder + "shader.vert", shaders_folder + "shader.frag");
 		}
 		if (action == GLFW_PRESS && key == GLFW_KEY_W) {
 			isWireframe = !isWireframe;
@@ -243,6 +243,12 @@ void renderUI() {
 
 	ImGui::End();
 
+	ImGui::Begin("Materials", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+
+	renderMaterialUI(material, 0);
+
+	ImGui::End();
+
 	ImGui::Render();
 }
 
@@ -300,31 +306,23 @@ int main() {
 	// Lights
 
 	lights.push_back(std::make_shared<DirectionalLight>(
-		glm::vec3(0.7f, 0.9f, 0.9f), 4.0f,
-		glm::normalize(glm::vec3(0.04f, -0.544f, -0.838f))));
+		glm::vec3(1.0), 4.0f, glm::normalize(glm::vec3(0.0f, -0.4f, -0.9f))));
 
-	glm::vec3 pos1 = 1.5f * glm::normalize(glm::vec3(-1, 0.5, 0.5));
-	glm::vec3 pos2 = 1.5f * glm::normalize(glm::vec3(1, 0.5, -0.1));
-	glm::vec3 pos3 = 1.5f * glm::normalize(glm::vec3(0.2, 0, -1));
+	lights.push_back(std::make_shared<DirectionalLight>(
+		glm::vec3(1.0), 4.0f,
+		glm::normalize(glm::vec3(-0.94f, -0.1f, -0.33f))));
 
-	lights.push_back(std::make_shared<PointLight>(
-		glm::vec3(1.0f, 0.5f, 0.5f), 4.0f, pos1, 1.0f, 0.0f, 0.2f));
-	lights.push_back(std::make_shared<PointLight>(
-		glm::vec3(0.5f, 1.0f, 0.5f), 4.0f, pos2, 1.0f, 0.0f, 0.2f));
-	lights.push_back(std::make_shared<PointLight>(
-		glm::vec3(0.8f, 0.5f, 1.0f), 4.0f, pos3, 1.0f, 0.0f, 0.2f));
-
-	Material material{glm::vec3(1.0f), 0.8f, 0.5f, glm::vec3(1.0f)};
+	lights.push_back(std::make_shared<DirectionalLight>(
+		glm::vec3(1.0), 4.0f, glm::normalize(glm::vec3(0.4f, 0.37f, 0.84f))));
 
 	// Load shaders
 	std::string shaders_folder = "../Resources/Shaders/";
-	std::shared_ptr<ShaderProgram> shader =
-		ShaderProgram::genBasicShaderProgram(shaders_folder + "shader.vert",
-											 shaders_folder + "shader.frag");
+	shader = ShaderProgram::genBasicShaderProgram(
+		shaders_folder + "shader.vert", shaders_folder + "shader.frag");
 
 	// Generate sphere mesh
 	Mesh sphereMesh;
-	generateSphereMesh(100, sphereMesh.positions(), sphereMesh.indices());
+	generateSphereMesh(400, sphereMesh.positions(), sphereMesh.indices());
 
 	sphereMesh.recomputePerVertexNormals();
 
@@ -339,7 +337,12 @@ int main() {
 
 		shader->use();
 
-		shader->set("model", glm::mat4(1.0f));
+		// Constant rotation of the sphere around the y-axis
+		float time = static_cast<float>(glfwGetTime());
+		glm::mat4 model = glm::rotate(glm::mat4(1.0f), time * 0.2f,
+									  glm::vec3(0.0f, 1.0f, 0.0f));
+
+		shader->set("model", model);
 		shader->set("view", cameraPtr->computeViewMatrix());
 		shader->set("projection", cameraPtr->computeProjectionMatrix());
 
@@ -412,7 +415,8 @@ void addFace(glm::vec3 xdir, glm::vec3 ydir, int subdivisions,
 	}
 }
 
-float getHeight(const glm::vec3& normPos);
+float getHeight(const glm::vec3& normPos,
+				FastNoise::SmartNode<FastNoise::FractalFBm>& fn);
 
 // Generate a sphere mesh with a given number of subdivisions
 void generateSphereMesh(int subdivisions, std::vector<glm::vec3>& vertices,
@@ -428,23 +432,29 @@ void generateSphereMesh(int subdivisions, std::vector<glm::vec3>& vertices,
 	addFace(-xdir, zdir, subdivisions, vertices, indices);
 	addFace(xdir, zdir, subdivisions, vertices, indices);
 
+	auto fnSimplex = FastNoise::New<FastNoise::Simplex>();
+	auto fnFractal = FastNoise::New<FastNoise::FractalFBm>();
+	fnFractal->SetSource(fnSimplex);
+	fnFractal->SetOctaveCount(10);
+
+#pragma omp parallel for
 	for (glm::vec3& vertex : vertices) {
 		vertex = glm::normalize(vertex);
-		vertex *= getHeight(vertex);
+		vertex *= getHeight(vertex, fnFractal);
 	}
 }
 
-float getHeight(const glm::vec3& normPos) {
-	auto fnSimplex = FastNoise::New<FastNoise::Simplex>();
-	auto fnFractal = FastNoise::New<FastNoise::FractalFBm>();
-
-	fnFractal->SetSource(fnSimplex);
-	fnFractal->SetOctaveCount(5);
-
-	float height = fnFractal->GenSingle3D(normPos.x, normPos.y, normPos.z, 0);
+float getHeight(const glm::vec3& normPos,
+				FastNoise::SmartNode<FastNoise::FractalFBm>& fn) {
+	float height = fn->GenSingle3D(normPos.x, normPos.y, normPos.z, 0);
 
 	height = 0.5f * height + 0.5f;
-	height = glm::pow(height, 5);
+	float ocean = 1.0f - height;
+	height = glm::pow(height, 4);
+	ocean = 1.0f - glm::pow(ocean, 3);
 
-	return 1 + height * 0.2f;
+	// Ocean == 1 -> height = 0, ocean = 0 -> height = height
+	height = glm::smoothstep(0.0f, 1.0f, ocean) * height;
+
+	return 1 + height * 0.5f;
 }

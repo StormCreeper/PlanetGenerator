@@ -113,6 +113,8 @@ vec3 evaluateRadiance(Material mat, LightSource source, vec3 normal, vec3 pos, R
     }
 }
 
+
+// Colors the surface of a procedural sphere planet
 void main() {
     vec3 radiance = vec3(0);
 
@@ -120,8 +122,32 @@ void main() {
     ray.origin = eyePos;
     ray.direction = normalize(fPos - eyePos);
 
+    vec3 normal = normalize(fNormal);
+    vec3 worldUp = normalize(fPos);
+
+    float steepness = 1 - pow(abs(dot(normal, worldUp)), 3);
+
+    Material mat = material;
+
+    // 1 -> green, 0 -> orange
+    mat.albedo = mix(vec3(0.1, 0.7, 0.0), vec3(0.8, 0.2, 0.0), steepness);
+
+    float height = length(fPos);
+    float radius = 1.0;
+    float oceanHeight = 0.02;
+    float beachHeight = 0.02;
+
+    if (height < radius + oceanHeight) {
+        mat.albedo = vec3(0.0, 0.0, 0.8);
+        mat.roughness = 0.3;
+        mat.metalness = 0.9;
+    } else if (height < radius + oceanHeight + beachHeight) {
+        // Interpolate between sand color and current albedo
+        mat.albedo = mix(vec3(1.0, 1.0, 0.2), mat.albedo, (height - radius - oceanHeight) / beachHeight);
+    }
+
     for(int i=0; i<numOfLights; i++) {
-        radiance += evaluateRadiance(material, lights[i], fNormal, fPos, ray);
+        radiance += evaluateRadiance(mat, lights[i], normal, fPos, ray);
     }
     FragColor = vec4(radiance, 1.0);
 }
