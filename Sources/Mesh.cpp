@@ -60,6 +60,7 @@ void Mesh::render() {
 void Mesh::recomputePerVertexNormals() {
 	_normals.clear();
 	_normals.resize(_positions.size(), glm::vec3(0.0, 0.0, 0.0));
+#pragma omp parallel
 	for (auto& t : _indices) {
 		glm::vec3 e0(_positions[t[1]] - _positions[t[0]]);
 		glm::vec3 e1(_positions[t[2]] - _positions[t[0]]);
