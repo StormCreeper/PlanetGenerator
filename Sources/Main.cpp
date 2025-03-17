@@ -12,21 +12,21 @@
 #include <cmath>
 
 #include "ShaderProgram.h"
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
-
-#include <FastNoise/FastNoise.h>
 
 #include "Camera.h"
 #include "Mesh.h"
 #include "Light.h"
 #include "Material.h"
 
+#include "editors/UIManager.h"
+#include "editors/DebugEditor.h"
+#include "editors/LightsEditor.h"
+#include "editors/MaterialEditor.h"
+
+#include "WorldGen.h"
+
 // Function prototypes
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
-void generateSphereMesh(int subdivisions, std::vector<glm::vec3>& vertices,
-						std::vector<glm::uvec3>& indices);
 
 // Global variables
 GLuint VAO, VBO, EBO;
@@ -37,6 +37,8 @@ std::shared_ptr<Camera> cameraPtr;
 
 std::vector<std::shared_ptr<AbstractLight>> lights;
 Material material{glm::vec3(1.0f), 0.8f, 0.5f, glm::vec3(1.0f)};
+
+static std::shared_ptr<UIManager> uiManager;
 
 static bool isRotating(false);
 static bool isPanning(false);
@@ -127,130 +129,7 @@ void windowSizeCallback(GLFWwindow* windowPtr, int width, int height) {
 							  static_cast<float>(height));
 }
 
-void renderMaterialUI(Material& mat, int id) {
-	ImGui::ColorEdit3(("Albedo##In" + std::to_string(id)).c_str(),
-					  &mat.albedo().x);
-
-	ImGui::SliderFloat(("Roughness##" + std::to_string(id)).c_str(),
-					   &mat.roughness(), 0.0f, 1.0f);
-
-	ImGui::SliderFloat(("Metalness##" + std::to_string(id)).c_str(),
-					   &mat.metalness(), 0.0f, 1.0f);
-
-	ImGui::ColorEdit3(("F0##" + std::to_string(id)).c_str(), &mat.F0().x);
-}
-
-void renderUI() {
-	ImGui::NewFrame();
-	ImGui::Begin("Performance", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-	ImGui::Text("FPS: %.1f", 1.0f / deltaTime);
-	ImGui::End();
-
-	ImGui::Begin("Lights", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-
-	const char* items[] = {"Directional", "Point"};
-
-	for (int i = 0; i < lights.size(); i++) {
-		AbstractLight& light = *lights[i];
-		if (ImGui::CollapsingHeader(
-				std::string("Light " + std::to_string(i)).c_str())) {
-			ImGui::Indent(10.0f);
-			const char* comboLabel = items[light.getType()];
-
-			if (ImGui::BeginCombo(
-					("Type##" + std::to_string(i)).c_str(),
-					comboLabel)) {	// Combo box for type selection
-				for (int n = 0; n < IM_ARRAYSIZE(items); n++) {
-					const bool is_selected = (comboLabel == items[n]);
-					if (ImGui::Selectable(items[n], is_selected)) {
-						if (n != light.getType()) {
-							std::shared_ptr<AbstractLight> new_light;
-							switch (n) {
-								case 0:
-									new_light =
-										std::make_shared<DirectionalLight>(
-											light.color(),
-											light.baseIntensity(),
-											glm::vec3(0.0, -1.0, 0.0));
-									break;
-								case 1:
-									new_light = std::make_shared<PointLight>(
-										light.color(), light.baseIntensity(),
-										glm::vec3(0.0), 1.0, 0.0, 0.0);
-							}
-							lights[i] = new_light;
-							light = *new_light;
-						};
-					}
-					if (is_selected) {
-						ImGui::SetItemDefaultFocus();  // You may set the
-													   // initial focus when
-													   // opening the combo
-													   // (scrolling + for
-													   // keyboard navigation
-													   // support)
-					}
-				}
-				ImGui::EndCombo();
-			}
-			// Common properties: color and intensity
-			glm::vec3 color = light.color();
-			float intensity = light.baseIntensity();
-			ImGui::ColorEdit3(("Color##" + std::to_string(i)).c_str(),
-							  &color.x);
-			ImGui::SliderFloat(("Intensity##" + std::to_string(i)).c_str(),
-							   &intensity, 0.0f, 10.0f);
-			light.color() = color;
-			light.baseIntensity() = intensity;
-
-			if (light.getType() == 0) {	 // Directional light
-				std::shared_ptr<DirectionalLight> dirLight =
-					std::dynamic_pointer_cast<DirectionalLight>(lights[i]);
-				glm::vec3 dir = dirLight->getDirection();
-				ImGui::SliderFloat3(("Direction##" + std::to_string(i)).c_str(),
-									&dir.x, -1.0f, 1.0f);
-				dirLight->setDirection(dir);
-			} else if (light.getType() == 1) {	// Point light
-				std::shared_ptr<PointLight> pointLight =
-					std::dynamic_pointer_cast<PointLight>(lights[i]);
-				glm::vec3 pos = pointLight->getTranslation();
-				ImGui::SliderFloat3(("Position##" + std::to_string(i)).c_str(),
-									&pos.x, -10.0f, 10.0f);
-				pointLight->setTranslation(pos);
-				ImGui::SliderFloat(
-					("Attenuation constant##" + std::to_string(i)).c_str(),
-					&pointLight->attenuationConstant(), 0.0f, 1.0f);
-				ImGui::SliderFloat(
-					("Attenuation linear##" + std::to_string(i)).c_str(),
-					&pointLight->attenuationLinear(), 0.0f, 1.0f);
-				ImGui::SliderFloat(
-					("Attenuation quadratic##" + std::to_string(i)).c_str(),
-					&pointLight->attenuationQuadratic(), 0.0f, 1.0f);
-			}
-			ImGui::Indent(-10.0f);
-		}
-	}
-	if (lights.size() < 10) {
-		if (ImGui::Button("Add light")) {
-			lights.push_back(std::make_shared<PointLight>(
-				glm::vec3(1.0f), 1.0f, glm::vec3(0.0f), 1.0f, 0.0f, 0.0f));
-		}
-		ImGui::SameLine();
-	}
-	if (lights.size() > 0 && ImGui::Button("Remove light")) {
-		lights.erase(lights.begin() + lights.size() - 1);
-	}
-
-	ImGui::End();
-
-	ImGui::Begin("Materials", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-
-	renderMaterialUI(material, 0);
-
-	ImGui::End();
-
-	ImGui::Render();
-}
+void renderMaterialUI(Material& mat, int id) {}
 
 int main() {
 	if (!glfwInit()) {
@@ -287,11 +166,6 @@ int main() {
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
 
-	// ImGui setup
-	ImGui::CreateContext();
-	ImGui_ImplGlfw_InitForOpenGL(windowPtr, true);
-	ImGui_ImplOpenGL3_Init("#version 460");
-
 	// Camera setup
 	int width, height;
 	glfwGetWindowSize(windowPtr, &width, &height);
@@ -318,15 +192,26 @@ int main() {
 	// Load shaders
 	std::string shaders_folder = "../Resources/Shaders/";
 	shader = ShaderProgram::genBasicShaderProgram(
-		shaders_folder + "shader.vert", shaders_folder + "shader.frag");
+		shaders_folder + "PlanetShader.vert",
+		shaders_folder + "PlanetShader.frag");
+
+	WorldGen worldGen{};
 
 	// Generate sphere mesh
 	Mesh sphereMesh;
-	generateSphereMesh(400, sphereMesh.positions(), sphereMesh.indices());
+	worldGen.generateSphereMesh(400, sphereMesh.positions(),
+								sphereMesh.indices());
 
 	sphereMesh.recomputePerVertexNormals();
 
 	sphereMesh.toGPU();
+
+	uiManager = std::make_shared<UIManager>();
+	uiManager->init(windowPtr);
+
+	uiManager->add(std::make_shared<DebugEditor>(deltaTime));
+	uiManager->add(std::make_shared<LightsEditor>(lights));
+	uiManager->add(std::make_shared<MaterialEditor>(material));
 
 	while (!glfwWindowShouldClose(windowPtr)) {
 		float currentFrame = static_cast<float>(glfwGetTime());
@@ -360,10 +245,7 @@ int main() {
 		sphereMesh.render();
 
 		// ImGui UI
-		ImGui_ImplOpenGL3_NewFrame();
-		ImGui_ImplGlfw_NewFrame();
-		renderUI();
-		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+		uiManager->renderUIs();
 
 		glfwSwapBuffers(windowPtr);
 		glfwPollEvents();
@@ -372,9 +254,7 @@ int main() {
 	// Cleanup
 	glDeleteVertexArrays(1, &VAO);
 	glDeleteBuffers(1, &VBO);
-	ImGui_ImplOpenGL3_Shutdown();
-	ImGui_ImplGlfw_Shutdown();
-	ImGui::DestroyContext();
+	uiManager->shutdown();
 	glfwDestroyWindow(windowPtr);
 	glfwTerminate();
 	return 0;
@@ -382,79 +262,4 @@ int main() {
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 	glViewport(0, 0, width, height);
-}
-
-// Generate a regular grid of vertices using xdir and ydir as the basis vectors
-void addFace(glm::vec3 xdir, glm::vec3 ydir, int subdivisions,
-			 std::vector<glm::vec3>& vertices,
-			 std::vector<glm::uvec3>& indices) {
-	glm::vec3 zdir = glm::cross(xdir, ydir);
-
-	unsigned int offset = vertices.size();
-	for (int i = 0; i < subdivisions; i++) {
-		for (int j = 0; j < subdivisions; j++) {
-			// 0 to subdivisions - 1 => -1 to 1
-			float x = 2.0f * i / (float)(subdivisions - 1) - 1.0f;
-			float y = 2.0f * j / (float)(subdivisions - 1) - 1.0f;
-			glm::vec3 vertex = x * xdir + y * ydir + zdir;
-			vertices.push_back(vertex);
-		}
-	}
-
-	for (int i = 0; i < subdivisions - 1; i++) {
-		for (int j = 0; j < subdivisions - 1; j++) {
-			// 0 1
-			// 2 3
-			int v0 = i * subdivisions + j;
-			int v1 = i * subdivisions + j + 1;
-			int v2 = (i + 1) * subdivisions + j;
-			int v3 = (i + 1) * subdivisions + j + 1;
-			indices.push_back(glm::uvec3(v0, v2, v1) + offset);
-			indices.push_back(glm::uvec3(v1, v2, v3) + offset);
-		}
-	}
-}
-
-float getHeight(const glm::vec3& normPos,
-				FastNoise::SmartNode<FastNoise::FractalFBm>& fn);
-
-// Generate a sphere mesh with a given number of subdivisions
-void generateSphereMesh(int subdivisions, std::vector<glm::vec3>& vertices,
-						std::vector<glm::uvec3>& indices) {
-	glm::vec3 xdir = glm::vec3(1.0f, 0.0f, 0.0f);
-	glm::vec3 ydir = glm::vec3(0.0f, 1.0f, 0.0f);
-	glm::vec3 zdir = glm::vec3(0.0f, 0.0f, 1.0f);
-
-	addFace(xdir, ydir, subdivisions, vertices, indices);
-	addFace(-xdir, ydir, subdivisions, vertices, indices);
-	addFace(-ydir, zdir, subdivisions, vertices, indices);
-	addFace(ydir, zdir, subdivisions, vertices, indices);
-	addFace(-xdir, zdir, subdivisions, vertices, indices);
-	addFace(xdir, zdir, subdivisions, vertices, indices);
-
-	auto fnSimplex = FastNoise::New<FastNoise::Simplex>();
-	auto fnFractal = FastNoise::New<FastNoise::FractalFBm>();
-	fnFractal->SetSource(fnSimplex);
-	fnFractal->SetOctaveCount(10);
-
-#pragma omp parallel for
-	for (glm::vec3& vertex : vertices) {
-		vertex = glm::normalize(vertex);
-		vertex *= getHeight(vertex, fnFractal);
-	}
-}
-
-float getHeight(const glm::vec3& normPos,
-				FastNoise::SmartNode<FastNoise::FractalFBm>& fn) {
-	float height = fn->GenSingle3D(normPos.x, normPos.y, normPos.z, 0);
-
-	height = 0.5f * height + 0.5f;
-	float ocean = 1.0f - height;
-	height = glm::pow(height, 4);
-	ocean = 1.0f - glm::pow(ocean, 3);
-
-	// Ocean == 1 -> height = 0, ocean = 0 -> height = height
-	height = glm::smoothstep(0.0f, 1.0f, ocean) * height;
-
-	return 1 + height * 0.5f;
 }
