@@ -9,6 +9,7 @@ float sqr(float x) {
 
 in vec3 fNormal;
 in vec3 fPos;
+in vec3 fPos_model;
 
 #define MAX_LIGHTS 10
 
@@ -136,14 +137,26 @@ void main() {
     float radius = 1.0;
     float oceanHeight = 0.02;
     float beachHeight = 0.02;
+    float snowHeight = 1.3;
+    
+    float sinOff = sin(dot(fPos_model, vec3(1, 1, 1)) * 10.) * 0.03;
+    sinOff += sin(dot(fPos_model, vec3(1, 0.8, -1.1)) * 15.) * 0.02;
+    sinOff += sin(dot(fPos_model, vec3(-1, 0.8, 1.1)) * 150.) * 0.01;
+    sinOff += sin(dot(fPos_model, vec3(1, 0.8, -1.1)) * 130.) * 0.01;
+    bool snow = abs(dot(worldUp, vec3(0, 1, 0))) > (0.9 + sinOff) || height > snowHeight;
 
     if (height < radius + oceanHeight) {
         mat.albedo = vec3(0.0, 0.0, 0.8);
         mat.roughness = 0.3;
         mat.metalness = 0.9;
     } else if (height < radius + oceanHeight + beachHeight) {
-        // Interpolate between sand color and current albedo
         mat.albedo = mix(vec3(1.0, 1.0, 0.2), mat.albedo, (height - radius - oceanHeight) / beachHeight);
+    }
+
+    if(snow) {
+        mat.albedo = vec3(1.0);
+        mat.roughness = 0.7;
+        mat.metalness = 0.3;
     }
 
     for(int i=0; i<numOfLights; i++) {
