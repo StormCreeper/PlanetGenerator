@@ -23,6 +23,8 @@
 #include "editors/LightsEditor.h"
 #include "editors/MaterialEditor.h"
 
+#include "Error.h"
+
 #include "WorldGen.h"
 
 #include "IO.h"
@@ -56,10 +58,10 @@ void keyCallback(GLFWwindow* windowPtr, int key, int scancode, int action,
 		if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE) {
 			glfwSetWindowShouldClose(windowPtr, true);
 		}
-		if (action == GLFW_PRESS && key == GLFW_KEY_F12) {
+		if (action == GLFW_PRESS && key == GLFW_KEY_F11) {
 			std::string shaders_folder = "../Resources/Shaders/";
 			shader = ShaderProgram::genBasicShaderProgram(
-				shaders_folder + "shader.vert", shaders_folder + "shader.frag");
+				shaders_folder + "PlanetShader.vert", shaders_folder + "PlanetShader.frag");
 		}
 		if (action == GLFW_PRESS && key == GLFW_KEY_W) {
 			isWireframe = !isWireframe;
@@ -142,6 +144,9 @@ int main() {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+	// Enable debug options
+	glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
+
 	GLFWwindow* windowPtr =
 		glfwCreateWindow(800, 600, "Planet Generation", NULL, NULL);
 	if (!windowPtr) {
@@ -162,11 +167,17 @@ int main() {
 		return -1;
 	}
 
+	glEnable(GL_DEBUG_OUTPUT);
+	glDebugMessageCallback(debugMessageCallback, nullptr);
+
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
 
-	IO::fetchTilePNG(0, 0, 0, "../Resources/Textures/Tile.png");
+	std::vector<glm::vec3> pixels;
+
+	GLuint textureID = IO::fetchTileToTexture(0, 0, 0);
+	std::cout << "Texture ID: " << textureID << std::endl;
 
 	// Camera setup
 	int width, height;
@@ -202,8 +213,7 @@ int main() {
 	// Generate sphere mesh
 	Mesh sphereMesh;
 	// worldGen.generateSphereMesh(400, sphereMesh.positions(), sphereMesh.indices());
-	std::vector<glm::vec2> positions2D;
-	worldGen.generateMercatorTileMesh(4, positions2D, sphereMesh.positions(), sphereMesh.indices());
+	worldGen.generateMercatorTileMesh(4, sphereMesh.texCoords(), sphereMesh.positions(), sphereMesh.indices());
 
 	sphereMesh.recomputePerVertexNormals();
 
@@ -245,6 +255,10 @@ int main() {
 		glm::vec3 eyePos = glm::inverse(cameraPtr->computeViewMatrix())[3];
 		shader->set("eyePos", eyePos);
 
+		shader->set("tex_diffuse", 0);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, textureID);
+
 		sphereMesh.render();
 
 		// ImGui UI
@@ -255,6 +269,7 @@ int main() {
 	}
 
 	// Cleanup
+	glDeleteTextures(1, &textureID);
 	glDeleteVertexArrays(1, &VAO);
 	glDeleteBuffers(1, &VBO);
 	uiManager->shutdown();

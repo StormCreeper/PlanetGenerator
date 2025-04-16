@@ -7,9 +7,12 @@ float sqr(float x) {
     return x * x;
 }
 
+uniform sampler2D tex_diffuse;
+
 in vec3 fNormal;
 in vec3 fPos;
 in vec3 fPos_model;
+in vec2 fTexCoord;
 
 #define MAX_LIGHTS 10
 
@@ -128,7 +131,7 @@ void main() {
 
     float steepness = 1 - pow(abs(dot(normal, worldUp)), 3);
 
-    Material mat = material;
+    /*Material mat = material;
 
     // 1 -> green, 0 -> orange
     mat.albedo = mix(vec3(0.1, 0.7, 0.0), vec3(0.8, 0.2, 0.0), steepness);
@@ -161,6 +164,9 @@ void main() {
 
     for(int i=0; i<numOfLights; i++) {
         radiance += evaluateRadiance(mat, lights[i], normal, fPos, ray);
-    }
-    FragColor = vec4(radiance, 1.0);
+    }*/
+
+    vec3 albedo = texture(tex_diffuse, fTexCoord).xyz;
+
+    FragColor = vec4(albedo, 1.0);
 }

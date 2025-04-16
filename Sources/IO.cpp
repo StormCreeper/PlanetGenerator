@@ -10,6 +10,11 @@
 
 #include <curl/curl.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
+#include <glad/glad.h>
+
 std::string IO::file2String(const std::string& filename) {
 	std::ifstream input(filename.c_str());
 	if (!input)
@@ -40,8 +45,29 @@ void IO::savePPM(const std::string& filename, int width, int height, const std::
 	out.close();
 }
 
+bool decodePNG(const std::vector<unsigned char>& pngData,
+			   int& width, int& height,
+			   std::vector<GLubyte>& outPixels) {
+	// stbi_set_flip_vertically_on_load(true);
+
+	int comp;
+	unsigned char* img = stbi_load_from_memory(
+		pngData.data(), int(pngData.size()),
+		&width, &height, &comp, /*req_channels=*/3);
+	if (!img) return false;
+
+	size_t npix = size_t(width) * height;
+	outPixels.reserve(npix);
+	for (size_t i = 0; i < npix; ++i) {
+		outPixels.push_back(img[i * 3 + 0]);
+		outPixels.push_back(img[i * 3 + 1]);
+		outPixels.push_back(img[i * 3 + 2]);
+	}
+	stbi_image_free(img);
+	return true;
+}
+
 size_t IO::write_data(void* ptr, size_t size, size_t nmemb, void* userdata) {
-	std::cout << "write_data called\n";
 	auto* buffer = static_cast<std::vector<unsigned char>*>(userdata);
 	size_t total = size * nmemb;
 	unsigned char* data = static_cast<unsigned char*>(ptr);
@@ -49,7 +75,7 @@ size_t IO::write_data(void* ptr, size_t size, size_t nmemb, void* userdata) {
 	return total;
 }
 
-bool IO::fetchTilePNG(int z, int x, int y, const std::string& outFilename) {
+bool IO::fetchTilePNG(int z, int x, int y, int& outWidth, int& outHeight, std::vector<GLubyte>& outPixels) {
 	// 1) Build the URL
 	char url[256];
 	std::snprintf(url, sizeof(url),
@@ -64,7 +90,7 @@ bool IO::fetchTilePNG(int z, int x, int y, const std::string& outFilename) {
 	}
 
 	// Buffer to hold the downloaded data
-	std::vector<unsigned char> pngData;
+	std::vector<GLubyte> pngData;
 
 	// 3) Set curl options
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "PlanetGen/1.0 (telo.philippe@gmail.com)");
@@ -90,16 +116,37 @@ bool IO::fetchTilePNG(int z, int x, int y, const std::string& outFilename) {
 	// 5) Clean up
 	curl_easy_cleanup(curl);
 
-	// 6) Save to file
-	std::ofstream fout(outFilename, std::ios::binary);
-	if (!fout) {
-		std::cerr << "Failed to open output file: " << outFilename << "\n";
+	// Decode PNG data
+
+	if (!decodePNG(pngData, outWidth, outHeight, outPixels)) {
+		std::cerr << "Failed to decode PNG data\n";
 		return false;
 	}
-	fout.write(reinterpret_cast<const char*>(pngData.data()), pngData.size());
-	fout.close();
 
-	std::cout << "Saved tile to " << outFilename << " ("
-			  << pngData.size() << " bytes)\n";
+	std::cout << "Decoded PNG data: " << outWidth << "x" << outHeight << ", tot: " << outPixels.size() << "\n";
+
 	return true;
+}
+
+unsigned int IO::fetchTileToTexture(int z, int x, int y) {
+	int width, height;
+	std::vector<GLubyte> pixels;
+	if (!fetchTilePNG(z, x, y, width, height, pixels)) {
+		std::cerr << "Failed to fetch tile PNG\n";
+		return 0;
+	}
+
+	std::cout << "Fetched tile PNG: " << width << "x" << height << ", tot: " << pixels.size() << "\n";
+
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+	unsigned int textureID;
+	glGenTextures(1, &textureID);
+	glBindTexture(GL_TEXTURE_2D, textureID);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glGenerateMipmap(GL_TEXTURE_2D);
+
+	return textureID;
 }

@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.9)
 project(PlanetGen LANGUAGES CXX)
 
 find_package(OpenMP REQUIRED)
+find_package(CURL     REQUIRED)
 
 add_subdirectory(dep)
 
@@ -35,3 +36,5 @@ target_link_libraries(PlanetGen LINK_PRIVATE IMGUI)
 target_link_libraries(PlanetGen PRIVATE OpenMP::OpenMP_CXX)
 
 target_link_libraries(PlanetGen PRIVATE FastNoise)
+
+target_link_libraries(PlanetGen PRIVATE CURL::libcurl)

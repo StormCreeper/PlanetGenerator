@@ -5,6 +5,8 @@
 #include <vector>
 #include <glm/glm.hpp>
 
+#include <glad/glad.h>
+
 class Mesh;
 
 class IO {
@@ -14,5 +16,6 @@ class IO {
    public:
 	static std::string file2String(const std::string& filename);
 	static void savePPM(const std::string& filename, int width, int height, const std::vector<glm::vec3>& pixels);
-	static bool fetchTilePNG(int z, int x, int y, const std::string& outFilename);
+	static bool fetchTilePNG(int z, int x, int y, int& outWidth, int& outHeight, std::vector<GLubyte>& outPixels);
+	static unsigned int fetchTileToTexture(int z, int x, int y);
 };

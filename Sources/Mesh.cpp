@@ -21,7 +21,7 @@ GLuint genIndexBuffer(size_t elementSize, size_t numElements,
 	return buffer;
 }
 
-GLuint genVertexArray(GLuint pos_vbo, GLuint norm_vbo, GLuint ebo) {
+GLuint genVertexArray(GLuint pos_vbo, GLuint norm_vbo, GLuint tex_vbo, GLuint ebo) {
 	GLuint vao;
 	glGenVertexArrays(1, &vao);
 	glBindVertexArray(vao);
@@ -34,21 +34,25 @@ GLuint genVertexArray(GLuint pos_vbo, GLuint norm_vbo, GLuint ebo) {
 	glBindBuffer(GL_ARRAY_BUFFER, norm_vbo);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), 0);
 
+	glEnableVertexAttribArray(2);
+	glBindBuffer(GL_ARRAY_BUFFER, tex_vbo);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), 0);
+
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
 	glBindVertexArray(0);
 	return vao;
 }
 
 void Mesh::toGPU() {
-	_posVbo =
-		genGPUBuffer(sizeof(float) * 3, _positions.size(), _positions.data());
+	_posVbo = genGPUBuffer(sizeof(float) * 3, _positions.size(), _positions.data());
 
-	_normVbo =
-		genGPUBuffer(sizeof(float) * 3, _normals.size(), _normals.data());
+	_normVbo = genGPUBuffer(sizeof(float) * 3, _normals.size(), _normals.data());
 
-	_ebo = genIndexBuffer(sizeof(unsigned int) * 3, _indices.size(),
-						  _indices.data());
-	_vao = genVertexArray(_posVbo, _normVbo, _ebo);
+	_texVbo = genGPUBuffer(sizeof(float) * 2, _texCoords.size(), _texCoords.data());
+
+	_ebo = genIndexBuffer(sizeof(unsigned int) * 3, _indices.size(), _indices.data());
+
+	_vao = genVertexArray(_posVbo, _normVbo, _texVbo, _ebo);
 }
 
 void Mesh::render() {
