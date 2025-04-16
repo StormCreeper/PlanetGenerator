@@ -4,6 +4,11 @@
 
 #include <FastNoise/FastNoise.h>
 
+#include <math.h>
+#define DEG2RAD(a) ((a) / (180 / M_PI))
+#define RAD2DEG(a) ((a) * (180 / M_PI))
+#define EARTH_RADIUS 6378137.0f
+
 class WorldGen {
    private:
 	inline void addFace(glm::vec3 xdir, glm::vec3 ydir, int subdivisions,
@@ -36,8 +41,7 @@ class WorldGen {
 		}
 	}
 
-	inline float getHeight(const glm::vec3& normPos,
-						   FastNoise::SmartNode<FastNoise::FractalFBm>& fn) {
+	inline float getHeight(const glm::vec3& normPos, FastNoise::SmartNode<FastNoise::FractalFBm>& fn) {
 		float height = fn->GenSingle3D(normPos.x, normPos.y, normPos.z, 0);
 
 		height = 0.5f * height + 0.5f;
@@ -76,6 +80,63 @@ class WorldGen {
 		for (glm::vec3& vertex : vertices) {
 			vertex = glm::normalize(vertex);
 			vertex *= getHeight(vertex, fnFractal);
+		}
+	}
+
+	// Inverse Web‑Mercator: from normalized v in [0,1] to latitude in radians
+	inline float invMercatorLat(float v) {
+		// y ∈ [−π, +π], with v=0 → y=+π, v=1 → y=−π
+		float y = glm::pi<float>() * (1.0f - 2.0f * v);
+		// φ = arctan(sinh(y))
+		return atanf(sinhf(y));
+	}
+
+	void generateMercatorTileMesh(int z,								// zoom level (number of subdivisions)
+								  std::vector<glm::vec2>& positions2D,	// UV coordinates
+								  std::vector<glm::vec3>& positions3D,	// 3D positions on unit sphere
+								  std::vector<glm::uvec3>& indices) {
+		const uint32_t n = 1u << z;	 // number of squares per axis
+		const uint32_t vertCount = (n + 1) * (n + 1);
+
+		positions2D.reserve(vertCount);
+		positions3D.reserve(vertCount);
+		indices.reserve(n * n * 2);	 // 2 triangles per square
+
+		// build the grid of (u,v)
+		for (uint32_t y = 0; y <= n; ++y) {
+			float v = float(y) / float(n);
+			for (uint32_t x = 0; x <= n; ++x) {
+				float u = float(x) / float(n);
+				positions2D.emplace_back(u, v);
+
+				// inverse‑Mercator-> lat/lon
+				float lon = glm::two_pi<float>() * u - glm::pi<float>();  // [−π,π]
+				float lat = invMercatorLat(v);							  // [−π/2,+π/2]
+
+				// spherical to Cartesian on unit sphere
+				float cosLat = cosf(lat);
+				glm::vec3 p = {
+					cosLat * cosf(lon),
+					sinf(lat),
+					cosLat * sinf(lon)};
+				positions3D.push_back(p);
+			}
+		}
+
+		auto idx = [&](uint32_t ix, uint32_t iy) {
+			return iy * (n + 1) + ix;
+		};
+
+		for (uint32_t y = 0; y < n; ++y) {
+			for (uint32_t x = 0; x < n; ++x) {
+				uint32_t i0 = idx(x, y);
+				uint32_t i1 = idx(x + 1, y);
+				uint32_t i2 = idx(x, y + 1);
+				uint32_t i3 = idx(x + 1, y + 1);
+
+				indices.push_back({i0, i1, i2});
+				indices.push_back({i1, i3, i2});
+			}
 		}
 	}
 };

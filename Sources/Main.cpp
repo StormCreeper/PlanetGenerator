@@ -25,6 +25,8 @@
 
 #include "WorldGen.h"
 
+#include "IO.h"
+
 // Function prototypes
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 
@@ -129,8 +131,6 @@ void windowSizeCallback(GLFWwindow* windowPtr, int width, int height) {
 							  static_cast<float>(height));
 }
 
-void renderMaterialUI(Material& mat, int id) {}
-
 int main() {
 	if (!glfwInit()) {
 		std::cerr << "Failed to initialize GLFW" << std::endl;
@@ -166,6 +166,8 @@ int main() {
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
 
+	IO::fetchTilePNG(0, 0, 0, "../Resources/Textures/Tile.png");
+
 	// Camera setup
 	int width, height;
 	glfwGetWindowSize(windowPtr, &width, &height);
@@ -199,8 +201,9 @@ int main() {
 
 	// Generate sphere mesh
 	Mesh sphereMesh;
-	worldGen.generateSphereMesh(400, sphereMesh.positions(),
-								sphereMesh.indices());
+	// worldGen.generateSphereMesh(400, sphereMesh.positions(), sphereMesh.indices());
+	std::vector<glm::vec2> positions2D;
+	worldGen.generateMercatorTileMesh(4, positions2D, sphereMesh.positions(), sphereMesh.indices());
 
 	sphereMesh.recomputePerVertexNormals();
 
@@ -224,7 +227,7 @@ int main() {
 
 		// Constant rotation of the sphere around the y-axis
 		float time = static_cast<float>(glfwGetTime());
-		glm::mat4 model = glm::rotate(glm::mat4(1.0f), time * 0.2f,
+		glm::mat4 model = glm::rotate(glm::mat4(1.0f), time * 0.2f * 0.0f,
 									  glm::vec3(0.0f, 1.0f, 0.0f));
 
 		shader->set("model", model);
